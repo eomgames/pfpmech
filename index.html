@@ -1,0 +1,222 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <title>PFP Mech Demo</title>
+    <meta charset="utf-8" />
+    <meta
+      name="viewport"
+      content="width=device-width, user-scalable=no, minimum-scale=1.0, maximum-scale=1.0"
+    />
+  </head>
+
+  <body>
+    <script type="importmap">
+      {
+        "imports": {
+          "three": "https://unpkg.com/three@0.162.0/build/three.module.js",
+          "three/addons/": "https://unpkg.com/three@0.162.0/examples/jsm/"
+        }
+      }
+    </script>
+
+    <script type="module">
+      import * as THREE from "three";
+
+      import { OrbitControls } from "three/addons/controls/OrbitControls.js";
+      import { RGBELoader } from "three/addons/loaders/RGBELoader.js";
+      import { DRACOLoader } from "three/addons/loaders/DRACOLoader.js";
+      import { GLTFLoader } from "three/addons/loaders/GLTFLoader.js";
+
+      const clock = new THREE.Clock();
+
+      let camera, scene, renderer, mixer;
+      let hemiLight,
+        hdrEnvironment,
+        useHemiLight = true;
+
+      init();
+
+      function init() {
+        const container = document.createElement("div");
+        document.body.appendChild(container);
+
+        camera = new THREE.PerspectiveCamera(
+          45,
+          window.innerWidth / window.innerHeight,
+          0.25,
+          20
+        );
+        camera.position.set(0, 3, 5);
+
+        scene = new THREE.Scene();
+
+        // in favor of the hdr, commenting this out
+        // hemiLight = new THREE.HemisphereLight(0xffffff, 0x000000, 5);
+        // scene.add(hemiLight);
+
+        new RGBELoader()
+          .setPath("./")
+          .load("sunflowers_puresky_1k.hdr", function (texture) {
+            texture.mapping = THREE.EquirectangularReflectionMapping;
+
+            scene.background = texture;
+            scene.environment = texture;
+
+            render();
+
+            const loader = new GLTFLoader().setPath(
+              "https://ordinals.com/content/"
+            );
+            const dracoLoader = new DRACOLoader();
+            // dracoLoader.setDecoderPath("/examples/jsm/libs/draco/");
+            dracoLoader.setDecoderPath(
+              "https://www.gstatic.com/draco/v1/decoders/"
+            );
+            loader.setDRACOLoader(dracoLoader);
+            loader.load(
+              "1cb2bef59b914ea0f6a12de9d11a77f660847df715443d41b35ba2e25d3a7392i0",
+              async function (gltf) {
+                const model = gltf.scene;
+
+                // wait until the model can be added to the scene without blocking due to shader compilation
+
+                await renderer.compileAsync(model, camera, scene);
+
+                mixer = new THREE.AnimationMixer(model);
+                const idleAction = mixer.clipAction(gltf.animations[0]);
+                const walk = mixer.clipAction(gltf.animations[1]);
+                // idleAction.play();
+                // walk.play();
+
+                scene.add(model);
+                render();
+
+                const faceMesh = gltf.scene.getObjectByName("face");
+
+                // Load remote texture
+                const textureLoader = new THREE.TextureLoader();
+                const inscriptions = [
+                  "917a3e2883a1ef031ba7a677c44e1da4d3f09012cbec7cbc6b2c41f864de7d04i0", // wizard
+                  "d7a207f2abecc344e02de9c24fce8dd1dd06e1e93622015bfa00dc902ae01889i0", // boaf
+                  "90a6c322e2534abe4fd08c65b25ea12ef8f7dc92574cc995a0557277d1b6e38di0", // skull
+                  "5278ed3c3a0ef2d8adac964e908e988885b6eefc1cdad5099e56e4568c50151ai0", // nodemonke db
+                  "c085aac98b70e2ada8d4f4f47cc01ba6abeeb1ca938f34e3bfbfcf10932ae205i0", // op_bird
+                  "78814a61013ee20ce47af785bbdeb94695725df7f56ec256e44b12e1fe7f318ai0", // nodemonke sea
+                  "",
+                ];
+
+                let inscription;
+                // pick a random inscription
+                inscription =
+                  inscriptions[Math.floor(Math.random() * inscriptions.length)];
+                // inscription = inscriptions[0]; // force wizard
+
+                if (inscription === "") {
+                  // just use default texture
+                  return;
+                }
+
+                const baseUrl = "https://ordinals.com/content/";
+                if (inscription) {
+                  textureLoader.load(baseUrl + inscription, function (texture) {
+                    texture.minFilter = THREE.NearestFilter;
+                    texture.magFilter = THREE.NearestFilter;
+                    texture.flipY = false; // flip texture on y axis
+                    //   texture.encoding = THREE.sRGBEncoding;
+
+                    const clonedMaterial = faceMesh.material.clone();
+                    clonedMaterial.map = texture;
+                    faceMesh.material = clonedMaterial;
+                    renderer.render(scene, camera);
+                  });
+                }
+                createAnimationButtons(gltf); // Call the function here
+              }
+            );
+          });
+
+        renderer = new THREE.WebGLRenderer({ antialias: true });
+        renderer.setPixelRatio(window.devicePixelRatio);
+        renderer.setSize(window.innerWidth, window.innerHeight);
+        // renderer.toneMapping = THREE.ACESFilmicToneMapping;
+        // renderer.toneMapping = THREE.ReinhardToneMapping;
+        renderer.toneMapping = THREE.NoToneMapping;
+        // renderer.toneMapping = null;
+        renderer.toneMappingExposure = 1;
+        container.appendChild(renderer.domElement);
+
+        const controls = new OrbitControls(camera, renderer.domElement);
+        controls.addEventListener("change", render); // use if there is no animation loop
+        controls.minDistance = 2;
+        controls.maxDistance = 10;
+        controls.target.set(0, 1.5, -0.2);
+        controls.update();
+
+        window.addEventListener("resize", onWindowResize);
+      }
+
+      function onWindowResize() {
+        camera.aspect = window.innerWidth / window.innerHeight;
+        camera.updateProjectionMatrix();
+
+        renderer.setSize(window.innerWidth, window.innerHeight);
+
+        render();
+      }
+
+      //
+
+      function render() {
+        requestAnimationFrame(render);
+        const deltaTime = clock.getDelta();
+        if (mixer) mixer.update(deltaTime);
+        renderer.outputEncoding = THREE.sRGBEncoding;
+        renderer.render(scene, camera);
+      }
+
+      function createAnimationButtons(gltf) {
+        const container = document.createElement("div");
+        const buttonDiv = document.getElementById("buttonDiv");
+        buttonDiv.appendChild(container);
+
+        gltf.animations.forEach((animationClip, index) => {
+          const button = document.createElement("button");
+          button.textContent = `Play Animation ${index + 1}`;
+
+          button.addEventListener("click", () => {
+            // stop all current actions
+            mixer.stopAllAction();
+            const animationAction = mixer.clipAction(animationClip);
+            animationAction.play();
+          });
+
+          container.appendChild(button);
+        });
+      }
+
+      window.updateTexture = function () {
+        console.log("Updating texture");
+        const faceMesh = scene.getObjectByName("face");
+        const inscriptionId = document.getElementById("inscription_id").value;
+        const textureLoader = new THREE.TextureLoader();
+        textureLoader.load(
+          `https://ordinals.com/content/${inscriptionId}`,
+          function (texture) {
+            texture.minFilter = THREE.NearestFilter;
+            texture.magFilter = THREE.NearestFilter;
+            texture.flipY = false; // Flip the texture vertically
+
+            const clonedMaterial = faceMesh.material.clone();
+            clonedMaterial.map = texture;
+            faceMesh.material = clonedMaterial;
+            renderer.render(scene, camera);
+          }
+        );
+      };
+    </script>
+    <div id="buttonDiv">
+      Inscription ID for face: <input type="text" id="inscription_id" />
+      <button onclick="window.updateTexture()">Update Texture</button>
+    </div>
+  </body>
+</html>
